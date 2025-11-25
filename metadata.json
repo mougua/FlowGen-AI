@@ -1,0 +1,5 @@
+{
+  "name": "FlowGen AI",
+  "description": "An AI-powered flowchart generator that uses Gemini 2.5 Flash for logic and Gemini 2.5 Flash Image for vivid, custom diagram visuals. Exports directly to Draw.io.",
+  "requestFramePermissions": []
+}
