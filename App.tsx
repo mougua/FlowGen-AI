@@ -4,11 +4,19 @@ import ReactFlow, {
   Background, 
   Controls, 
   Node, 
+  Edge,
   useNodesState, 
   useEdgesState, 
   ConnectionLineType,
   ReactFlowProvider,
   MarkerType,
+  addEdge,
+  Connection,
+  Panel,
+  EdgeChange,
+  NodeChange,
+  applyNodeChanges,
+  applyEdgeChanges
 } from 'reactflow';
 import { 
   Wand2, 
@@ -16,7 +24,8 @@ import {
   Layout,
   Film,
   FileCode,
-  Zap
+  Zap,
+  Plus,
 } from 'lucide-react';
 import { toCanvas } from 'html-to-image';
 // @ts-ignore
@@ -27,6 +36,7 @@ import { getLayoutedElements } from './utils/layout';
 import { downloadDrawioFile } from './utils/drawioExporter';
 import { GenerationStatus, FlowData } from './types';
 import CustomNode from './components/CustomNode';
+import { PropertiesPanel } from './components/PropertiesPanel';
 
 const nodeTypes = {
   custom: CustomNode,
@@ -39,8 +49,11 @@ const FlowCanvas = ({
     onNodesChange, 
     onEdgesChange, 
     onNodeClick, 
+    onEdgeClick,
     onPaneClick,
-    status 
+    onConnect,
+    status,
+    onAddNode
 }: any) => {
     return (
         <ReactFlow
@@ -49,17 +62,40 @@ const FlowCanvas = ({
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeClick={onNodeClick}
+            onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
+            onConnect={onConnect}
             nodeTypes={nodeTypes}
             connectionLineType={ConnectionLineType.SmoothStep}
             fitView
             attributionPosition="bottom-right"
             className="bg-slate-50/50"
             minZoom={0.1}
+            defaultEdgeOptions={{
+                type: 'smoothstep',
+                animated: true,
+                style: { stroke: '#64748b', strokeWidth: 2 },
+                markerEnd: { type: MarkerType.ArrowClosed, color: '#64748b' },
+                labelStyle: { fill: '#475569', fontWeight: 600, fontSize: 11 },
+                labelBgStyle: { fill: '#ffffff', fillOpacity: 0.95 },
+                labelBgPadding: [8, 4],
+                labelBgBorderRadius: 4,
+            }}
         >
             <Background color="#cbd5e1" gap={24} size={1} />
             <Controls className="bg-white border border-slate-200 shadow-sm text-slate-600" />
             
+            <Panel position="top-center" className="bg-white p-1 rounded-lg border border-slate-200 shadow-sm flex gap-1">
+                <button 
+                    onClick={onAddNode}
+                    className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-md text-slate-600 text-xs font-semibold transition-colors"
+                    title="Add a new node"
+                >
+                    <Plus size={14} />
+                    Add Node
+                </button>
+            </Panel>
+
             {nodes.length === 0 && status.step === 'idle' && (
                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                    <div className="text-center max-w-md p-8">
@@ -80,12 +116,23 @@ const FlowCanvas = ({
 export function App() {
   const [prompt, setPrompt] = useState('');
   const [status, setStatus] = useState<GenerationStatus>({ step: 'idle', message: '' });
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
   const [layoutDirection, setLayoutDirection] = useState<'TB' | 'LR'>('TB');
   
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // Selection State
+  const [selectedElement, setSelectedElement] = useState<{ id: string, type: 'node' | 'edge' } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  // Standard React Flow change handlers
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
+    [setNodes]
+  );
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)),
+    [setEdges]
+  );
 
   // Helper to re-run layout
   const applyLayout = useCallback((direction: 'TB' | 'LR', currentNodes: Node[], currentEdges: any[]) => {
@@ -105,10 +152,123 @@ export function App() {
       applyLayout(newDirection, nodes, edges);
   };
 
+  // Connection Handler
+  const onConnect = useCallback((params: Connection) => {
+    setEdges((eds) => addEdge({
+        ...params, 
+        type: 'smoothstep', 
+        animated: true,
+        style: { stroke: '#64748b', strokeWidth: 2 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#64748b' }
+    }, eds));
+  }, [setEdges]);
+
+  // Add Node Handler
+  const handleAddNode = useCallback(() => {
+    const newNodeId = `node-${Date.now()}`;
+    const newNode: Node = {
+        id: newNodeId,
+        type: 'custom',
+        position: { x: 100, y: 100 }, 
+        style: { width: 160, height: 70 }, // Default size for resizable node
+        data: { 
+            id: newNodeId,
+            label: 'New Node', 
+            shape: 'rectangle', 
+            color: 'slate',
+            shadow: 'sm',
+            textAlign: 'center'
+        },
+    };
+    
+    setNodes((nds) => {
+        const lastNode = nds[nds.length - 1];
+        if (lastNode) {
+             newNode.position = { x: lastNode.position.x + 40, y: lastNode.position.y + 40 };
+        }
+        return [...nds, newNode];
+    });
+    setSelectedElement({ id: newNodeId, type: 'node' });
+  }, [setNodes]);
+
+  // Update Handlers
+  const handleUpdateNode = (id: string, newData: any) => {
+      setNodes((nds) => nds.map((node) => {
+          if (node.id === id) {
+              return { ...node, data: { ...node.data, ...newData } };
+          }
+          return node;
+      }));
+  };
+
+  const handleUpdateEdge = (id: string, newData: any) => {
+      setEdges((eds) => eds.map((edge) => {
+          if (edge.id === id) {
+              // Map properties from PropertiesPanel to React Flow edge properties
+              const updatedEdge = { ...edge, data: { ...edge.data, ...newData } };
+              
+              if (newData.label !== undefined) updatedEdge.label = newData.label;
+              
+              if (newData.strokeStyle) {
+                  updatedEdge.style = {
+                      ...updatedEdge.style,
+                      strokeDasharray: newData.strokeStyle === 'dashed' ? '5,5' : '0'
+                  };
+              }
+              
+              if (newData.animated !== undefined) {
+                  updatedEdge.animated = newData.animated;
+              }
+
+              return updatedEdge;
+          }
+          return edge;
+      }));
+  };
+
+  const handleLayerChange = (id: string, action: 'front' | 'back' | 'up' | 'down') => {
+      setNodes((nds) => {
+          const index = nds.findIndex((n) => n.id === id);
+          if (index === -1) return nds;
+          
+          const newNodes = [...nds];
+          const node = newNodes.splice(index, 1)[0];
+          
+          if (action === 'front') {
+              newNodes.push(node);
+          } else if (action === 'back') {
+              newNodes.unshift(node);
+          } else if (action === 'up') {
+              if (index < newNodes.length) {
+                  newNodes.splice(index + 1, 0, node);
+              } else {
+                  newNodes.push(node);
+              }
+          } else if (action === 'down') {
+              if (index > 0) {
+                  newNodes.splice(index - 1, 0, node);
+              } else {
+                  newNodes.unshift(node);
+              }
+          }
+          return newNodes;
+      });
+  };
+
+  const handleDeleteElement = (id: string) => {
+      if (selectedElement?.type === 'node') {
+          setNodes((nds) => nds.filter((n) => n.id !== id));
+          setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
+      } else {
+          setEdges((eds) => eds.filter((e) => e.id !== id));
+      }
+      setSelectedElement(null);
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
 
-    setSelectedNodeId(null);
+    setSelectedElement(null);
     setNodes([]);
     setEdges([]);
     setStatus({ step: 'analyzing', message: 'Structuring diagram...' });
@@ -141,7 +301,9 @@ export function App() {
           id: n.id,
           type: 'custom',
           position: { x: 0, y: 0 }, 
-          data: { ...n }
+          // Default size matching the custom node defaults
+          style: { width: n.shape === 'circle' ? 128 : 160, height: n.shape === 'circle' ? 128 : 70 }, 
+          data: { ...n, shadow: 'sm', textAlign: 'center' }
       }));
 
       const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
@@ -197,12 +359,16 @@ export function App() {
 
               await new Promise(r => setTimeout(r, 100));
 
-              // High Resolution Capture: pixelRatio 2.5
-              // Added fontEmbedCSS: '' to skip fetching external fonts which causes CORS errors
               const canvas = await toCanvas(viewport, {
                   backgroundColor: '#f8fafc',
                   pixelRatio: 2.5, 
                   fontEmbedCSS: '', 
+                  skipFonts: true, // Fix: Skip external fonts to prevent CORS errors
+                  filter: (node) => {
+                      // Fix: Filter out external stylesheets that block reading cssRules
+                      if (node.tagName === 'LINK') return false;
+                      return true;
+                  }
               });
 
               const ctx = canvas.getContext('2d');
@@ -235,13 +401,30 @@ export function App() {
       }
   };
 
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-      setSelectedNodeId(node.id);
+  const onNodeClick = useCallback((e: React.MouseEvent, node: Node) => {
+      e.stopPropagation(); // Prevent pane click
+      setSelectedElement({ id: node.id, type: 'node' });
+  }, []);
+
+  const onEdgeClick = useCallback((e: React.MouseEvent, edge: Edge) => {
+      e.stopPropagation();
+      setSelectedElement({ id: edge.id, type: 'edge' });
   }, []);
 
   const onPaneClick = useCallback(() => {
-      setSelectedNodeId(null);
+      setSelectedElement(null);
   }, []);
+
+  // Get current selected item data
+  const getSelectedItem = () => {
+      if (!selectedElement) return null;
+      if (selectedElement.type === 'node') {
+          return nodes.find(n => n.id === selectedElement.id);
+      }
+      return edges.find(e => e.id === selectedElement.id);
+  };
+
+  const selectedItem = getSelectedItem();
 
   return (
     <div className="h-screen w-full flex flex-col bg-slate-50">
@@ -299,61 +482,82 @@ export function App() {
         {/* Sidebar */}
         <aside className="w-96 bg-white border-r border-slate-200 flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
             <div className="p-6 flex flex-col h-full gap-6">
-                <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Describe your diagram
-                    </label>
-                    <textarea
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="e.g., A system architecture with Client, API Gateway, and Microservices..."
-                    className="w-full h-40 p-4 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 focus:ring-2 focus:ring-indigo-50 outline-none resize-none text-sm leading-relaxed"
+                
+                {selectedElement && selectedItem ? (
+                    <PropertiesPanel 
+                        selectedElement={selectedItem}
+                        type={selectedElement.type}
+                        onChange={selectedElement.type === 'node' ? handleUpdateNode : handleUpdateEdge}
+                        onLayerChange={handleLayerChange}
+                        onDelete={handleDeleteElement}
+                        onClose={() => setSelectedElement(null)}
                     />
-                </div>
-
-                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                    <div className="flex items-start gap-3">
-                        <Zap className="text-indigo-600 mt-1 shrink-0" size={18} />
-                        <p className="text-xs text-indigo-800 leading-relaxed">
-                        <strong>Exports:</strong> Use 'XML' for editable Draw.io files or 'GIF' for a high-res animation loop.
-                        </p>
-                    </div>
-                </div>
-
-                <button
-                    onClick={handleGenerate}
-                    disabled={status.step === 'analyzing' || !prompt.trim()}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 transition-all flex items-center justify-center gap-2"
-                >
-                    {status.step === 'analyzing' ? (
+                ) : (
                     <>
-                        <Loader2 className="animate-spin" size={18} />
-                        Generating...
-                    </>
-                    ) : (
-                    <>
-                        <Wand2 size={18} />
-                        Generate Diagram
-                    </>
-                    )}
-                </button>
-
-                {status.step !== 'idle' && (
-                    <div className="mt-auto">
-                        <div className="flex justify-between text-xs font-medium text-slate-500 mb-2">
-                            <span>Status</span>
-                            <span>{status.step === 'complete' ? '100%' : '50%'}</span>
-                        </div>
-                        <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                            <div 
-                                className={`h-full bg-indigo-500 transition-all duration-500 ease-out ${status.step === 'error' ? 'bg-red-500' : ''}`}
-                                style={{ width: status.step === 'complete' ? '100%' : status.step === 'analyzing' ? '50%' : '0%' }}
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            Describe your diagram
+                            </label>
+                            <textarea
+                            value={prompt}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            placeholder="e.g., A system architecture with Client, API Gateway, and Microservices..."
+                            className="w-full h-40 p-4 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 focus:ring-2 focus:ring-indigo-50 outline-none resize-none text-sm leading-relaxed"
                             />
                         </div>
-                        <p className="text-center text-xs text-slate-400 mt-2 h-5">
-                            {status.message}
-                        </p>
-                    </div>
+
+                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                            <div className="flex items-start gap-3">
+                                <Zap className="text-indigo-600 mt-1 shrink-0" size={18} />
+                                <div className="space-y-1">
+                                    <p className="text-xs text-indigo-800 leading-relaxed font-semibold">
+                                        Pro Tips:
+                                    </p>
+                                    <ul className="text-xs text-indigo-800/80 list-disc pl-3 space-y-0.5">
+                                        <li>Select a node to edit color, shape, shadow.</li>
+                                        <li>Select a line to change style (dashed/solid).</li>
+                                        <li>Drag handles to resize nodes.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleGenerate}
+                            disabled={status.step === 'analyzing' || !prompt.trim()}
+                            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 transition-all flex items-center justify-center gap-2"
+                        >
+                            {status.step === 'analyzing' ? (
+                            <>
+                                <Loader2 className="animate-spin" size={18} />
+                                Generating...
+                            </>
+                            ) : (
+                            <>
+                                <Wand2 size={18} />
+                                Generate Diagram
+                            </>
+                            )}
+                        </button>
+
+                        {status.step !== 'idle' && (
+                            <div className="mt-auto">
+                                <div className="flex justify-between text-xs font-medium text-slate-500 mb-2">
+                                    <span>Status</span>
+                                    <span>{status.step === 'complete' ? '100%' : '50%'}</span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                    <div 
+                                        className={`h-full bg-indigo-500 transition-all duration-500 ease-out ${status.step === 'error' ? 'bg-red-500' : ''}`}
+                                        style={{ width: status.step === 'complete' ? '100%' : status.step === 'analyzing' ? '50%' : '0%' }}
+                                    />
+                                </div>
+                                <p className="text-center text-xs text-slate-400 mt-2 h-5">
+                                    {status.message}
+                                </p>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </aside>
@@ -367,8 +571,11 @@ export function App() {
                     onNodesChange={onNodesChange} 
                     onEdgesChange={onEdgesChange} 
                     onNodeClick={onNodeClick} 
+                    onEdgeClick={onEdgeClick}
                     onPaneClick={onPaneClick}
+                    onConnect={onConnect}
                     status={status}
+                    onAddNode={handleAddNode}
                 />
            </ReactFlowProvider>
         </main>

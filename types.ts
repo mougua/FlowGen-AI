@@ -4,6 +4,11 @@ export interface FlowNode {
   label: string;
   shape?: 'rectangle' | 'diamond' | 'circle' | 'cylinder' | 'cloud' | 'parallelogram' | 'pill';
   color?: string; 
+  // New Visual Properties
+  fontSize?: 'sm' | 'base' | 'lg' | 'xl';
+  textAlign?: 'left' | 'center' | 'right';
+  shadow?: 'none' | 'sm' | 'md' | 'lg' | 'xl';
+  borderStyle?: 'solid' | 'dashed' | 'dotted';
 }
 
 export interface FlowEdge {

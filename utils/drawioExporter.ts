@@ -29,10 +29,37 @@ const getColorStyle = (colorName: string = 'slate') => {
   return map[colorName] || map['slate'];
 };
 
-const getShapeStyle = (shape: string = 'rectangle') => {
-    // Base style for all nodes
-    let base = "whiteSpace=wrap;html=1;shadow=1;";
+const getShapeStyle = (data: any) => {
+    const shape = data.shape || 'rectangle';
     
+    // Base style for all nodes
+    let base = "whiteSpace=wrap;html=1;";
+    
+    // Shadow
+    if (data.shadow && data.shadow !== 'none') {
+        base += "shadow=1;";
+    } else {
+        base += "shadow=0;";
+    }
+    
+    // Border Style
+    if (data.borderStyle === 'dashed') {
+        base += "dashed=1;";
+    } else if (data.borderStyle === 'dotted') {
+        base += "dashed=1;dashPattern=1 2;";
+    }
+
+    // Text Alignment
+    if (data.textAlign === 'left') base += "align=left;";
+    else if (data.textAlign === 'right') base += "align=right;";
+    else base += "align=center;";
+
+    // Font Size Mapping
+    if (data.fontSize === 'sm') base += "fontSize=10;";
+    else if (data.fontSize === 'lg') base += "fontSize=14;";
+    else if (data.fontSize === 'xl') base += "fontSize=16;";
+    else base += "fontSize=12;";
+
     switch (shape) {
         case 'pill':
             return base + "rounded=1;absoluteArcSize=1;arcSize=50;";
@@ -67,21 +94,18 @@ export const generateDrawioXml = (nodes: Node[], edges: Edge[]) => {
     nodes.forEach((node) => {
       const { x, y } = node.position;
       
-      // Use dimensions from internal data if available, or defaults
-      // CustomNode default min-w is 150, min-h 60. 
-      const isCircle = node.data.shape === 'circle';
-      const width = isCircle ? 128 : 160; 
-      const height = isCircle ? 128 : 70;
+      // Use explicit styles from resizing if available, else defaults
+      const width = node.style?.width || (node.data.shape === 'circle' ? 128 : 160);
+      const height = node.style?.height || (node.data.shape === 'circle' ? 128 : 70);
 
       const label = escapeXml(node.data.label || "");
       const color = node.data.color || 'slate';
-      const shape = node.data.shape || 'rectangle';
 
       const colorStyle = getColorStyle(color);
-      const shapeStyle = getShapeStyle(shape);
+      const shapeStyle = getShapeStyle(node.data);
 
       // Compose the full style string
-      const fullStyle = `${shapeStyle}fillColor=${colorStyle.fill};strokeColor=${colorStyle.stroke};fontColor=${colorStyle.font};strokeWidth=2;fontSize=12;fontStyle=1;`;
+      const fullStyle = `${shapeStyle}fillColor=${colorStyle.fill};strokeColor=${colorStyle.stroke};fontColor=${colorStyle.font};strokeWidth=2;fontStyle=1;`;
   
       xml += `
           <mxCell id="${node.id}" value="${label}" style="${fullStyle}" vertex="1" parent="1">
@@ -95,9 +119,15 @@ export const generateDrawioXml = (nodes: Node[], edges: Edge[]) => {
     edges.forEach((edge) => {
       const label = edge.label ? escapeXml(edge.label as string) : '';
       
-      // Match "Smooth Step" style from React Flow in Draw.io
-      // rounded=1 gives rounded corners, orthogonalEdgeStyle gives right angles
-      const style = "edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#64748b;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#475569;labelBackgroundColor=#ffffff;";
+      // Determine style based on edge properties or defaults
+      let style = "edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#475569;labelBackgroundColor=#ffffff;";
+      
+      // Check custom styles
+      if (edge.style?.strokeDasharray === '5,5') {
+          style += "dashed=1;";
+      }
+
+      style += "strokeColor=#64748b;";
       
       xml += `
           <mxCell id="${edge.id}" value="${label}" style="${style}" edge="1" parent="1" source="${edge.source}" target="${edge.target}">
