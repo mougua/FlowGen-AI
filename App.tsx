@@ -26,12 +26,15 @@ import {
   FileCode,
   Zap,
   Plus,
+  RefreshCw,
+  Trash2,
+  Sparkles
 } from 'lucide-react';
 import { toCanvas } from 'html-to-image';
 // @ts-ignore
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 
-import { generateFlowchartStructure } from './services/geminiService';
+import { generateFlowchartStructure, updateFlowchartStructure } from './services/geminiService';
 import { getLayoutedElements } from './utils/layout';
 import { downloadDrawioFile } from './utils/drawioExporter';
 import { GenerationStatus, FlowData } from './types';
@@ -49,7 +52,7 @@ const FlowCanvas = ({
     onNodesChange, 
     onEdgesChange, 
     onNodeClick, 
-    onEdgeClick,
+    onEdgeClick, 
     onPaneClick,
     onConnect,
     status,
@@ -104,7 +107,7 @@ const FlowCanvas = ({
                        </div>
                        <h3 className="text-lg font-semibold text-slate-700 mb-2">FlowGen AI</h3>
                        <p className="text-slate-500">
-                         Describe any process, system, or map. I will build the layout and structure for you.
+                         Describe any process, system, mind map, or org chart. I will build the layout and structure for you.
                        </p>
                    </div>
                </div>
@@ -170,7 +173,7 @@ export function App() {
         id: newNodeId,
         type: 'custom',
         position: { x: 100, y: 100 }, 
-        style: { width: 160, height: 70 }, // Default size for resizable node
+        style: { width: 160, height: 70 }, 
         data: { 
             id: newNodeId,
             label: 'New Node', 
@@ -204,22 +207,17 @@ export function App() {
   const handleUpdateEdge = (id: string, newData: any) => {
       setEdges((eds) => eds.map((edge) => {
           if (edge.id === id) {
-              // Map properties from PropertiesPanel to React Flow edge properties
               const updatedEdge = { ...edge, data: { ...edge.data, ...newData } };
-              
               if (newData.label !== undefined) updatedEdge.label = newData.label;
-              
               if (newData.strokeStyle) {
                   updatedEdge.style = {
                       ...updatedEdge.style,
                       strokeDasharray: newData.strokeStyle === 'dashed' ? '5,5' : '0'
                   };
               }
-              
               if (newData.animated !== undefined) {
                   updatedEdge.animated = newData.animated;
               }
-
               return updatedEdge;
           }
           return edge;
@@ -234,22 +232,14 @@ export function App() {
           const newNodes = [...nds];
           const node = newNodes.splice(index, 1)[0];
           
-          if (action === 'front') {
-              newNodes.push(node);
-          } else if (action === 'back') {
-              newNodes.unshift(node);
-          } else if (action === 'up') {
-              if (index < newNodes.length) {
-                  newNodes.splice(index + 1, 0, node);
-              } else {
-                  newNodes.push(node);
-              }
+          if (action === 'front') newNodes.push(node);
+          else if (action === 'back') newNodes.unshift(node);
+          else if (action === 'up') {
+              if (index < newNodes.length) newNodes.splice(index + 1, 0, node);
+              else newNodes.push(node);
           } else if (action === 'down') {
-              if (index > 0) {
-                  newNodes.splice(index - 1, 0, node);
-              } else {
-                  newNodes.unshift(node);
-              }
+              if (index > 0) newNodes.splice(index - 1, 0, node);
+              else newNodes.unshift(node);
           }
           return newNodes;
       });
@@ -265,28 +255,65 @@ export function App() {
       setSelectedElement(null);
   };
 
-  const handleGenerate = async () => {
+  const handleClearCanvas = () => {
+    setNodes([]);
+    setEdges([]);
+    setSelectedElement(null);
+    setPrompt('');
+    setStatus({ step: 'idle', message: '' });
+  };
+
+  const handleGenerateOrUpdate = async () => {
     if (!prompt.trim()) return;
 
     setSelectedElement(null);
-    setNodes([]);
-    setEdges([]);
-    setStatus({ step: 'analyzing', message: 'Structuring diagram...' });
+    setStatus({ step: 'analyzing', message: nodes.length > 0 ? 'Updating diagram...' : 'Structuring diagram...' });
 
     try {
-      const flowData: FlowData = await generateFlowchartStructure(prompt);
-      
-      const initialDirection = flowData.layoutDirection === 'LR' ? 'LR' : 'TB';
-      setLayoutDirection(initialDirection);
+      let flowData: FlowData;
 
+      if (nodes.length > 0) {
+          // UPDATE MODE
+          const currentData: FlowData = {
+              nodes: nodes.map(n => ({
+                  id: n.id,
+                  label: n.data.label,
+                  shape: n.data.shape,
+                  color: n.data.color,
+                  shadow: n.data.shadow,
+                  borderStyle: n.data.borderStyle,
+                  fontSize: n.data.fontSize,
+                  textAlign: n.data.textAlign
+              })),
+              edges: edges.map(e => ({
+                  source: e.source,
+                  target: e.target,
+                  label: e.label as string,
+                  animated: e.animated,
+                  style: e.style
+              })),
+              layoutDirection: layoutDirection
+          };
+          flowData = await updateFlowchartStructure(currentData, prompt);
+      } else {
+          // CREATE MODE
+          flowData = await generateFlowchartStructure(prompt);
+      }
+      
+      const newDirection = flowData.layoutDirection === 'LR' ? 'LR' : 'TB';
+      
       const rfEdges = flowData.edges.map((edge) => ({
         id: `e${edge.source}-${edge.target}`,
         source: edge.source,
         target: edge.target,
         label: edge.label,
         type: 'smoothstep', 
-        animated: true,
-        style: { stroke: '#64748b', strokeWidth: 2 },
+        animated: edge.animated !== false, // Default to true if undefined
+        style: { 
+            stroke: '#64748b', 
+            strokeWidth: 2,
+            strokeDasharray: edge.style?.strokeDasharray
+        },
         markerEnd: {
             type: MarkerType.ArrowClosed,
             color: '#64748b',
@@ -301,21 +328,23 @@ export function App() {
           id: n.id,
           type: 'custom',
           position: { x: 0, y: 0 }, 
-          // Default size matching the custom node defaults
+          // Default size logic
           style: { width: n.shape === 'circle' ? 128 : 160, height: n.shape === 'circle' ? 128 : 70 }, 
-          data: { ...n, shadow: 'sm', textAlign: 'center' }
+          data: { ...n, shadow: n.shadow || 'sm', textAlign: n.textAlign || 'center' }
       }));
 
+      // Only run auto-layout if it's a new generation or major structure change
       const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
           rfNodes, 
           rfEdges, 
-          initialDirection
+          newDirection
       );
       
       setNodes(layoutedNodes);
       setEdges(layoutedEdges);
+      setLayoutDirection(newDirection);
 
-      setStatus({ step: 'complete', message: 'Diagram ready!' });
+      setStatus({ step: 'complete', message: 'Diagram updated!' });
 
     } catch (error: any) {
       console.error(error);
@@ -363,9 +392,8 @@ export function App() {
                   backgroundColor: '#f8fafc',
                   pixelRatio: 2.5, 
                   fontEmbedCSS: '', 
-                  skipFonts: true, // Fix: Skip external fonts to prevent CORS errors
+                  skipFonts: true, 
                   filter: (node) => {
-                      // Fix: Filter out external stylesheets that block reading cssRules
                       if (node.tagName === 'LINK') return false;
                       return true;
                   }
@@ -402,7 +430,7 @@ export function App() {
   };
 
   const onNodeClick = useCallback((e: React.MouseEvent, node: Node) => {
-      e.stopPropagation(); // Prevent pane click
+      e.stopPropagation(); 
       setSelectedElement({ id: node.id, type: 'node' });
   }, []);
 
@@ -415,7 +443,6 @@ export function App() {
       setSelectedElement(null);
   }, []);
 
-  // Get current selected item data
   const getSelectedItem = () => {
       if (!selectedElement) return null;
       if (selectedElement.type === 'node') {
@@ -494,15 +521,29 @@ export function App() {
                     />
                 ) : (
                     <>
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
-                            Describe your diagram
+                         {nodes.length > 0 && (
+                            <button 
+                                onClick={handleClearCanvas}
+                                className="flex items-center justify-center gap-2 w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm font-medium transition-colors mb-2 border border-slate-200"
+                            >
+                                <RefreshCw size={14} />
+                                Start New Diagram
+                            </button>
+                        )}
+
+                        <div className="flex-1 flex flex-col">
+                            <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center justify-between">
+                                <span>{nodes.length > 0 ? "Edit your diagram" : "Describe your diagram"}</span>
+                                {nodes.length > 0 && <span className="text-xs text-indigo-500 font-normal">Editing Mode Active</span>}
                             </label>
                             <textarea
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="e.g., A system architecture with Client, API Gateway, and Microservices..."
-                            className="w-full h-40 p-4 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 focus:ring-2 focus:ring-indigo-50 outline-none resize-none text-sm leading-relaxed"
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                                placeholder={nodes.length > 0 
+                                    ? "e.g., Change all blue nodes to red, or Add a 'Cache' node between Client and Server..."
+                                    : "e.g., A system architecture with Client, API Gateway, and Microservices..."
+                                }
+                                className="flex-1 w-full p-4 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 focus:ring-2 focus:ring-indigo-50 outline-none resize-none text-sm leading-relaxed"
                             />
                         </div>
 
@@ -511,37 +552,37 @@ export function App() {
                                 <Zap className="text-indigo-600 mt-1 shrink-0" size={18} />
                                 <div className="space-y-1">
                                     <p className="text-xs text-indigo-800 leading-relaxed font-semibold">
-                                        Pro Tips:
+                                        AI Capabilities:
                                     </p>
                                     <ul className="text-xs text-indigo-800/80 list-disc pl-3 space-y-0.5">
-                                        <li>Select a node to edit color, shape, shadow.</li>
-                                        <li>Select a line to change style (dashed/solid).</li>
-                                        <li>Drag handles to resize nodes.</li>
+                                        <li>Creates Flowcharts, Mind Maps, Org Charts.</li>
+                                        <li>Edit Mode: "Make it a mind map", "Add step".</li>
+                                        <li>Styles: "Make critical path red".</li>
                                     </ul>
                                 </div>
                             </div>
                         </div>
 
                         <button
-                            onClick={handleGenerate}
+                            onClick={handleGenerateOrUpdate}
                             disabled={status.step === 'analyzing' || !prompt.trim()}
                             className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200 transition-all flex items-center justify-center gap-2"
                         >
                             {status.step === 'analyzing' ? (
                             <>
                                 <Loader2 className="animate-spin" size={18} />
-                                Generating...
+                                {nodes.length > 0 ? 'Updating...' : 'Generating...'}
                             </>
                             ) : (
                             <>
-                                <Wand2 size={18} />
-                                Generate Diagram
+                                {nodes.length > 0 ? <Sparkles size={18} /> : <Wand2 size={18} />}
+                                {nodes.length > 0 ? 'Update Diagram' : 'Generate Diagram'}
                             </>
                             )}
                         </button>
 
                         {status.step !== 'idle' && (
-                            <div className="mt-auto">
+                            <div className="mt-auto pt-4">
                                 <div className="flex justify-between text-xs font-medium text-slate-500 mb-2">
                                     <span>Status</span>
                                     <span>{status.step === 'complete' ? '100%' : '50%'}</span>
@@ -552,7 +593,7 @@ export function App() {
                                         style={{ width: status.step === 'complete' ? '100%' : status.step === 'analyzing' ? '50%' : '0%' }}
                                     />
                                 </div>
-                                <p className="text-center text-xs text-slate-400 mt-2 h-5">
+                                <p className="text-center text-xs text-slate-400 mt-2 h-5 truncate">
                                     {status.message}
                                 </p>
                             </div>
@@ -571,7 +612,7 @@ export function App() {
                     onNodesChange={onNodesChange} 
                     onEdgesChange={onEdgesChange} 
                     onNodeClick={onNodeClick} 
-                    onEdgeClick={onEdgeClick}
+                    onEdgeClick={onEdgeClick} 
                     onPaneClick={onPaneClick}
                     onConnect={onConnect}
                     status={status}

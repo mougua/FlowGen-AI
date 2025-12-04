@@ -15,12 +15,17 @@ export interface FlowEdge {
   source: string;
   target: string;
   label?: string;
+  animated?: boolean;
+  style?: {
+      strokeDasharray?: string;
+  };
 }
 
 export interface FlowData {
   nodes: FlowNode[];
   edges: FlowEdge[];
   layoutDirection?: 'TB' | 'LR' | 'RL' | 'BT'; 
+  diagramType?: 'flowchart' | 'mindmap' | 'architecture' | 'sequence' | 'hierarchy';
 }
 
 export interface GenerationStatus {
